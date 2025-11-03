@@ -754,16 +754,28 @@
 
 
         @media (max-width: 430px) {
+            /* Allow scrolling and avoid clipping on small screens */
+            body {
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
 
-            /* Keep profile block centered with translate */
+            /* Let the container grow taller than viewport */
+            .container {
+                height: auto;
+                min-height: 100vh;
+                padding-bottom: 24px;
+            }
+
+            /* Place profile block in normal flow to prevent viewport clipping */
             #profile-block {
-                width: 90vw;
-                max-width: 350px;
-                min-height: 280px;
+                position: static;
+                width: 92vw;
+                max-width: 420px;
                 padding: 15px;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
+                margin: 16px auto;
+                transform: none;
+                min-height: unset;
             }
 
             /* Skills block lives inside profile-block; keep it full-width of parent */
@@ -1020,7 +1032,7 @@
             <div class="profile-footer">
 
                 <div id="skills-block">
-                    <h2 class="skills-title">Skills</h2>
+                    <h2 class="skills-title">Languages</h2>
                     <div class="skill">
                         <div class="skill-name">
                             <img src="assets/autistic.png" alt="Autistic" class="skill-icon">

@@ -278,6 +278,16 @@ document.addEventListener('DOMContentLoaded', () => {
     backgroundMusic.play().catch(err => {
       console.error("Failed to play music after start screen touch:", err);
     });
+
+    // Ensure background video starts on first mobile interaction as well
+    try {
+      videoElement.load();
+    } catch (_) {}
+    const video = document.getElementById('background');
+    video.muted = false;
+    video.play().catch(err => {
+      console.error("Video play failed on touchstart:", err);
+    });
     profileBlock.classList.remove('hidden');
     gsap.fromTo(profileBlock,
       { opacity: 0, y: -50 },
