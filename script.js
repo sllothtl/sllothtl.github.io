@@ -16,6 +16,11 @@ try {
 }
 const videoElement = document.getElementById("background");
 try { videoElement.load(); } catch (_) {}
+try {
+  videoElement.setAttribute('playsinline', '');
+  videoElement.setAttribute('webkit-playsinline', '');
+  videoElement.playsInline = true;
+} catch (_) {}
 
 // Robust play helper that retries with alternative sources on failure
 function tryPlayVideoWithFallback(video, preferredSources) {
@@ -266,12 +271,20 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => startScreen.classList.add('hidden'), 300);
 
     const video = document.getElementById('background');
-    // Do not mute; play with sound after user interaction
-    video.muted = false;
+    // Ensure inline flags for iOS Safari
+    try { video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', ''); video.playsInline = true; video.webkitPlaysInline = true; } catch (_) {}
+    // Kickstart inline playback on mobile by starting muted
+    video.muted = true;
 
     // Prefer currently selected source and fall back to others if needed
     const currentIdx = parseInt(localStorage.getItem('bgCycleIndex') || '0', 10) || 0;
-    const ordered = [bgList[currentIdx], ...bgList.filter((_, i) => i !== currentIdx)];
+    let ordered = [bgList[currentIdx], ...bgList.filter((_, i) => i !== currentIdx)];
+    try {
+      const support = video.canPlayType && video.canPlayType('video/mp4');
+      if (support === '') {
+        ordered = bgList.slice();
+      }
+    } catch (_) {}
     // Ensure the desired source is applied and loaded before play
     try {
       if (sourceElement) {
@@ -281,10 +294,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       video.load();
     } catch (_) {}
-    // Immediate attempt under user activation
-    video.play().catch(() => {
-      tryPlayVideoWithFallback(video, ordered);
-    });
+    // Immediate attempt under user activation; when playing, unmute and then start music
+    video.play()
+      .then(() => {
+        try { video.muted = false; } catch (_) {}
+      })
+      .catch(() => { tryPlayVideoWithFallback(video, ordered); });
 
     // Profil bloğu animasyonu
     profileBlock.classList.remove('hidden');
@@ -332,8 +347,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => startScreen.classList.add('hidden'), 300);
     // Ensure background video starts on first mobile interaction as well
     const video = document.getElementById('background');
-    // Do not mute on mobile; user interaction has occurred
-    video.muted = false;
+    try { video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', ''); video.playsInline = true; video.webkitPlaysInline = true; } catch (_) {}
+    // Start muted to satisfy mobile; will unmute on 'playing'
+    video.muted = true;
     const currentIdx = parseInt(localStorage.getItem('bgCycleIndex') || '0', 10) || 0;
     const ordered = [bgList[currentIdx], ...bgList.filter((_, i) => i !== currentIdx)];
     // Ensure the desired source is applied and loaded before play
@@ -350,13 +366,14 @@ document.addEventListener('DOMContentLoaded', () => {
       tryPlayVideoWithFallback(video, ordered);
     });
 
-    // Start background music after initiating video to avoid autoplay conflicts
-    backgroundMusic.muted = false;
-    setTimeout(() => {
-      backgroundMusic.play().catch(err => {
-        console.error("Failed to play music after start screen touch:", err);
-      });
-    }, 150);
+    // If fallback path taken, also try to start music once video enters 'playing'
+    const oncePlaying = () => {
+      try { video.muted = false; } catch (_) {}
+      backgroundMusic.muted = false;
+      backgroundMusic.play().catch(() => {});
+      video.removeEventListener('playing', oncePlaying);
+    };
+    video.addEventListener('playing', oncePlaying, { once: true });
     profileBlock.classList.remove('hidden');
     gsap.fromTo(profileBlock,
       { opacity: 0, y: -50 },
@@ -571,9 +588,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ease: 'power2.in',
       onComplete: () => {
         // Prepare candidate sources: prefer requested, then the bgList as fallback
-        const fallbacks = [videoSrc, ...bgList.filter(src => src !== videoSrc)];
+        let fallbacks = [videoSrc, ...bgList.filter(src => src !== videoSrc)];
+        try {
+          const support = backgroundVideo.canPlayType && backgroundVideo.canPlayType('video/mp4');
+          if (support === '') {
+            fallbacks = bgList.slice();
+          }
+        } catch (_) {}
         try { backgroundVideo.pause(); } catch (_) {}
-        backgroundVideo.muted = false;
+        // Start muted to satisfy mobile, then unmute shortly after playback begins
+        backgroundVideo.muted = true;
 
         // Prepare UI/theme immediately
         if (currentAudio) {
@@ -583,9 +607,6 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAudio = audio;
         currentAudio.volume = volumeSlider.value;
         currentAudio.muted = isMuted;
-        setTimeout(() => {
-          currentAudio.play().catch(err => console.error("Failed to play theme music:", err));
-        }, 200);
 
         document.body.classList.remove('home-theme', 'hacker-theme', 'rain-theme', 'anime-theme', 'car-theme');
         document.body.classList.add(themeClass);
@@ -609,6 +630,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Start with fallbacks logic and fade in once playing attempt occurs
         tryPlayVideoWithFallback(backgroundVideo, fallbacks);
+        const startThemeAudio = () => {
+          try { backgroundVideo.muted = false; } catch (_) {}
+          currentAudio.play().catch(() => {});
+          backgroundVideo.removeEventListener('playing', startThemeAudio);
+        };
+        backgroundVideo.addEventListener('playing', startThemeAudio, { once: true });
         gsap.to(backgroundVideo, {
           opacity: 0.9,
           duration: 0.5,
