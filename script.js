@@ -15,6 +15,7 @@ try {
   sourceElement.src = bgList[0];
 }
 const videoElement = document.getElementById("background");
+try { videoElement.load(); } catch (_) {}
 
 // If selected video fails, try the next one in the list
 (() => {
@@ -217,14 +218,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeVisitorCounter();
 
   startScreen.addEventListener('click', () => {
-    startScreen.classList.add('hidden');
+    // Smoothly fade out start screen to avoid flash
+    try { startScreen.style.transition = 'opacity 300ms ease'; } catch (_) {}
+    startScreen.style.opacity = '0';
+    setTimeout(() => startScreen.classList.add('hidden'), 300);
 
     // Ses ve video birlikte oynatılacak
     backgroundMusic.muted = false;
 
-    videoElement.load();
-
     const video = document.getElementById('background');
+    // Do not mute; play with sound after user interaction
     video.muted = false;
 
     Promise.all([
@@ -273,17 +276,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startScreen.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    startScreen.classList.add('hidden');
+    // Smoothly fade out start screen to avoid flash
+    try { startScreen.style.transition = 'opacity 300ms ease'; } catch (_) {}
+    startScreen.style.opacity = '0';
+    setTimeout(() => startScreen.classList.add('hidden'), 300);
     backgroundMusic.muted = false;
     backgroundMusic.play().catch(err => {
       console.error("Failed to play music after start screen touch:", err);
     });
 
     // Ensure background video starts on first mobile interaction as well
-    try {
-      videoElement.load();
-    } catch (_) {}
     const video = document.getElementById('background');
+    // Do not mute on mobile; user interaction has occurred
     video.muted = false;
     video.play().catch(err => {
       console.error("Video play failed on touchstart:", err);
@@ -501,8 +505,17 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: 0.5,
       ease: 'power2.in',
       onComplete: () => {
-        backgroundVideo.src = videoSrc;
+        // Update <source> and reload
+        try {
+          sourceElement.src = videoSrc;
+        } catch (_) {
+          backgroundVideo.src = videoSrc;
+        }
+        try { backgroundVideo.pause(); } catch (_) {}
+        try { backgroundVideo.load(); } catch (_) {}
+        backgroundVideo.muted = false;
 
+        // Prepare UI/theme immediately
         if (currentAudio) {
           currentAudio.pause();
           currentAudio.currentTime = 0;
@@ -532,16 +545,27 @@ document.addEventListener('DOMContentLoaded', () => {
           gsap.to(profileBlock, { x: 0, opacity: 0.9, duration: 0.5, ease: 'power2.out' });
         }
 
-        gsap.to(backgroundVideo, {
-          opacity: 0.9,
-          duration: 0.5,
-          ease: 'power2.out',
-          onComplete: () => {
-            profileContainer.classList.remove('orbit');
-            void profileContainer.offsetWidth;
-            profileContainer.classList.add('orbit');
-          }
-        });
+        // Wait for video to be ready before showing it to avoid freezes
+        let ready = false;
+        const onReady = () => {
+          if (ready) return;
+          ready = true;
+          backgroundVideo.play().catch(err => console.error("Failed to start background video:", err));
+          gsap.to(backgroundVideo, {
+            opacity: 0.9,
+            duration: 0.5,
+            ease: 'power2.out',
+            onComplete: () => {
+              profileContainer.classList.remove('orbit');
+              void profileContainer.offsetWidth;
+              profileContainer.classList.add('orbit');
+            }
+          });
+          backgroundVideo.removeEventListener('loadeddata', onReady);
+        };
+        backgroundVideo.addEventListener('loadeddata', onReady);
+        // Fallback in case some devices don't fire loadeddata reliably
+        setTimeout(onReady, 1500);
       }
     });
   }
