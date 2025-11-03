@@ -17,6 +17,48 @@ try {
 const videoElement = document.getElementById("background");
 try { videoElement.load(); } catch (_) {}
 
+// Robust play helper that retries with alternative sources on failure
+function tryPlayVideoWithFallback(video, preferredSources) {
+  const sources = Array.from(new Set(preferredSources.filter(Boolean)));
+  if (sources.length === 0) return;
+  let attempt = 0;
+
+  const setSrc = (src) => {
+    try {
+      if (sourceElement) {
+        sourceElement.src = src;
+      } else {
+        video.src = src;
+      }
+      try { video.load(); } catch (_) {}
+    } catch (_) {}
+  };
+
+  const playCurrent = () => {
+    video.play().catch(() => {
+      attempt++;
+      if (attempt >= sources.length) return;
+      setSrc(sources[attempt]);
+      setTimeout(playCurrent, 150);
+    });
+  };
+
+  // Initialize with first source
+  setSrc(sources[0]);
+  // Retry on error/stall
+  const onError = () => {
+    attempt++;
+    if (attempt < sources.length) {
+      setSrc(sources[attempt]);
+      playCurrent();
+    }
+  };
+  video.addEventListener('error', onError, { once: true });
+  video.addEventListener('stalled', onError, { once: true });
+
+  playCurrent();
+}
+
 // If selected video fails, try the next one in the list
 (() => {
   let attempts = 0;
@@ -223,18 +265,26 @@ document.addEventListener('DOMContentLoaded', () => {
     startScreen.style.opacity = '0';
     setTimeout(() => startScreen.classList.add('hidden'), 300);
 
-    // Ses ve video birlikte oynatılacak
-    backgroundMusic.muted = false;
-
     const video = document.getElementById('background');
     // Do not mute; play with sound after user interaction
     video.muted = false;
 
-    Promise.all([
-      video.play().catch(err => {
-        console.error("Video play failed:", err);
-      })
-    ]);
+    // Prefer currently selected source and fall back to others if needed
+    const currentIdx = parseInt(localStorage.getItem('bgCycleIndex') || '0', 10) || 0;
+    const ordered = [bgList[currentIdx], ...bgList.filter((_, i) => i !== currentIdx)];
+    // Ensure the desired source is applied and loaded before play
+    try {
+      if (sourceElement) {
+        sourceElement.src = ordered[0];
+      } else {
+        video.src = ordered[0];
+      }
+      video.load();
+    } catch (_) {}
+    // Immediate attempt under user activation
+    video.play().catch(() => {
+      tryPlayVideoWithFallback(video, ordered);
+    });
 
     // Profil bloğu animasyonu
     profileBlock.classList.remove('hidden');
@@ -280,18 +330,33 @@ document.addEventListener('DOMContentLoaded', () => {
     try { startScreen.style.transition = 'opacity 300ms ease'; } catch (_) {}
     startScreen.style.opacity = '0';
     setTimeout(() => startScreen.classList.add('hidden'), 300);
-    backgroundMusic.muted = false;
-    backgroundMusic.play().catch(err => {
-      console.error("Failed to play music after start screen touch:", err);
-    });
-
     // Ensure background video starts on first mobile interaction as well
     const video = document.getElementById('background');
     // Do not mute on mobile; user interaction has occurred
     video.muted = false;
-    video.play().catch(err => {
-      console.error("Video play failed on touchstart:", err);
+    const currentIdx = parseInt(localStorage.getItem('bgCycleIndex') || '0', 10) || 0;
+    const ordered = [bgList[currentIdx], ...bgList.filter((_, i) => i !== currentIdx)];
+    // Ensure the desired source is applied and loaded before play
+    try {
+      if (sourceElement) {
+        sourceElement.src = ordered[0];
+      } else {
+        video.src = ordered[0];
+      }
+      video.load();
+    } catch (_) {}
+    // Immediate attempt under user activation
+    video.play().catch(() => {
+      tryPlayVideoWithFallback(video, ordered);
     });
+
+    // Start background music after initiating video to avoid autoplay conflicts
+    backgroundMusic.muted = false;
+    setTimeout(() => {
+      backgroundMusic.play().catch(err => {
+        console.error("Failed to play music after start screen touch:", err);
+      });
+    }, 150);
     profileBlock.classList.remove('hidden');
     gsap.fromTo(profileBlock,
       { opacity: 0, y: -50 },
@@ -505,14 +570,9 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: 0.5,
       ease: 'power2.in',
       onComplete: () => {
-        // Update <source> and reload
-        try {
-          sourceElement.src = videoSrc;
-        } catch (_) {
-          backgroundVideo.src = videoSrc;
-        }
+        // Prepare candidate sources: prefer requested, then the bgList as fallback
+        const fallbacks = [videoSrc, ...bgList.filter(src => src !== videoSrc)];
         try { backgroundVideo.pause(); } catch (_) {}
-        try { backgroundVideo.load(); } catch (_) {}
         backgroundVideo.muted = false;
 
         // Prepare UI/theme immediately
@@ -523,7 +583,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAudio = audio;
         currentAudio.volume = volumeSlider.value;
         currentAudio.muted = isMuted;
-        currentAudio.play().catch(err => console.error("Failed to play theme music:", err));
+        setTimeout(() => {
+          currentAudio.play().catch(err => console.error("Failed to play theme music:", err));
+        }, 200);
 
         document.body.classList.remove('home-theme', 'hacker-theme', 'rain-theme', 'anime-theme', 'car-theme');
         document.body.classList.add(themeClass);
@@ -545,27 +607,18 @@ document.addEventListener('DOMContentLoaded', () => {
           gsap.to(profileBlock, { x: 0, opacity: 0.9, duration: 0.5, ease: 'power2.out' });
         }
 
-        // Wait for video to be ready before showing it to avoid freezes
-        let ready = false;
-        const onReady = () => {
-          if (ready) return;
-          ready = true;
-          backgroundVideo.play().catch(err => console.error("Failed to start background video:", err));
-          gsap.to(backgroundVideo, {
-            opacity: 0.9,
-            duration: 0.5,
-            ease: 'power2.out',
-            onComplete: () => {
-              profileContainer.classList.remove('orbit');
-              void profileContainer.offsetWidth;
-              profileContainer.classList.add('orbit');
-            }
-          });
-          backgroundVideo.removeEventListener('loadeddata', onReady);
-        };
-        backgroundVideo.addEventListener('loadeddata', onReady);
-        // Fallback in case some devices don't fire loadeddata reliably
-        setTimeout(onReady, 1500);
+        // Start with fallbacks logic and fade in once playing attempt occurs
+        tryPlayVideoWithFallback(backgroundVideo, fallbacks);
+        gsap.to(backgroundVideo, {
+          opacity: 0.9,
+          duration: 0.5,
+          ease: 'power2.out',
+          onComplete: () => {
+            profileContainer.classList.remove('orbit');
+            void profileContainer.offsetWidth;
+            profileContainer.classList.add('orbit');
+          }
+        });
       }
     });
   }
